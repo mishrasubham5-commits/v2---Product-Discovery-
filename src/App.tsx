@@ -7,12 +7,9 @@ import {
   Lock, 
   ChevronRight, 
   TrendingUp,
-  Settings,
   LogOut,
   RefreshCw,
-  Info,
-  CheckCircle,
-  HelpCircle
+  CheckCircle
 } from "lucide-react";
 import { CURRICULUM, MOCK_LEADERBOARD } from "./data/curriculum";
 import { UserProfile, SubmissionItem, CustomLeaderboardEntry } from "./types";
@@ -41,7 +38,7 @@ export default function App() {
   // Onboarding/Login loading states
   const [authLoading, setAuthLoading] = useState(false);
   const [isMagicLinkSent, setIsMagicLinkSent] = useState(false);
-  const [activeTab, setActiveTab] = useState<"curriculum" | "leaderboard" | "settings">("curriculum");
+  const [activeTab, setActiveTab] = useState<"curriculum" | "leaderboard">("curriculum");
   const [selectedDayNum, setSelectedDayNum] = useState(1);
   const [submissionText, setSubmissionText] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -288,8 +285,6 @@ export default function App() {
         if (error) {
           setErrorMessage(error.message);
         }
-        // Always set magic link sent to true so the user is never stuck
-        // and can immediately access the direct sandbox login fallback link.
         setIsMagicLinkSent(true);
       } catch (err: any) {
         setErrorMessage(err.message || "Authentication failed.");
@@ -349,12 +344,6 @@ export default function App() {
     }
   };
 
-  const handleResetWorkspace = () => {
-    if (window.confirm("Are you sure you want to reset all your progress and streak info?")) {
-      handleSignOutCleanup();
-    }
-  };
-
   // --- AI EVALUATION WORKSPACE ---
   const getAISubmissionReview = async () => {
     if (!profile) return;
@@ -381,7 +370,6 @@ export default function App() {
       } else if (diffDays > 1) {
         calculatedStreak = 1; // Missed day logic: reset streak to 1
       }
-      // If diffDays === 0, keep same streak (multiple same-day submissions, although day is locked)
     } else {
       calculatedStreak = 1;
     }
@@ -446,12 +434,12 @@ Return your response in raw JSON matching this format:
         console.error("Gemini API Error, falling back to local simulation:", err);
         // Fallback simulated review
         aiScore = Math.min(10, Math.max(4, Math.floor(Math.random() * 5) + 6));
-        aiCritique = `[Simulated Feedback - API Error] Good effort on the ${activeDay.title} challenge. You analyzed the principles correctly. Focus on structuring user interviews around past behavior patterns and desired outcomes. Consider incorporating data-driven insights into your analysis for stronger recommendations.`;
+        aiCritique = `[Simulated Feedback - API Error] Good effort on the ${activeDay.title} challenge. You analyzed the principles correctly. Focus on structuring user interviews around past behavior patterns and desired outcomes.`;
       }
     } else {
       // Mock grading if no API key is set
       aiScore = Math.min(10, Math.max(4, Math.floor(Math.random() * 5) + 6));
-      aiCritique = `[Offline Mode Mock Critique] You have structured your response well for Day ${activeDay.day}. Your understanding of "${activeDay.title}" is clear. To maximize PM capabilities, consider adding data-driven insights and user research methodology to strengthen your product discovery approach.`;
+      aiCritique = `[Offline Mode Mock Critique] You have structured your response well for Day ${activeDay.day}. Your understanding of \"${activeDay.title}\" is clear. To maximize PM capabilities, consider adding data-driven insights and user research methodology.`;
     }
 
     const dailyScore = calculatedStreak + aiScore;
@@ -628,17 +616,9 @@ Return your response in raw JSON matching this format:
           >
             Leaderboard
           </button>
-          <button
-            onClick={() => setActiveTab("settings")}
-            className={`px-4 py-2 rounded-lg transition-all cursor-pointer ${
-              activeTab === "settings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-900"
-            }`}
-          >
-            <Settings className="w-4 h-4 inline mr-1" /> Settings
-          </button>
         </div>
 
-        {/* User Badge Info */}
+        {/* User Badge Info & Logout */}
         <div className="flex items-center gap-3">
           <div className="text-right">
             <div className="font-bold text-slate-900 text-xs">{profile.name}</div>
@@ -903,106 +883,6 @@ Return your response in raw JSON matching this format:
                     })}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: SETTINGS CONFIG PANEL */}
-          {activeTab === "settings" && (
-            <div className="bg-white border border-slate-200 rounded-[24px] p-6 shadow-xs max-w-xl mx-auto w-full space-y-6">
-              <div>
-                <h3 className="text-lg font-display font-extrabold text-slate-900 uppercase tracking-tight">
-                  Challenge Settings
-                </h3>
-                <p className="text-xs text-slate-500 mt-1 font-semibold">
-                  Configure local database links, AI API credentials, and simulate verification routines.
-                </p>
-              </div>
-
-              {/* Supabase Status Card */}
-              <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Database Infrastructure
-                </span>
-                <div className="flex justify-between items-center">
-                  <div className="text-xs font-bold text-slate-900">Supabase State:</div>
-                  <div
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded border uppercase tracking-wider font-mono ${
-                      isSupabaseConfigured
-                        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                        : "bg-amber-50 border-amber-200 text-amber-800 animate-pulse"
-                    }`}
-                  >
-                    {isSupabaseConfigured ? "Connected (Live Sync)" : "Connected Offline"}
-                  </div>
-                </div>
-                {!isSupabaseConfigured && (
-                  <div className="pt-2 text-[10px] text-slate-500 leading-normal flex gap-1.5 items-start">
-                    <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                    <span>
-                      Supabase environment variables are missing. App falls back to local storage automatically. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local` to enable real sync features.
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Magic Link Simulated Tool */}
-              {!isSupabaseConfigured && localStorage.getItem("discovery_temp_onboard") && (
-                <div className="p-4 bg-indigo-50 rounded-2xl border border-indigo-150 space-y-3.5">
-                  <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider block">
-                    Magic Link Simulator
-                  </span>
-                  <p className="text-xs text-slate-650 leading-relaxed font-semibold">
-                    We detected a pending login request in simulated offline mode. Click the button below to simulate verifying the email link and logging in.
-                  </p>
-                  <button
-                    onClick={simulateMagicLinkClick}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer"
-                  >
-                    Simulate Magic Link Click 🎉
-                  </button>
-                </div>
-              )}
-
-              {/* Gemini API Key configuration */}
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Gemini API Configuration Key
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={geminiApiKey}
-                    onChange={(e) => setGeminiApiKey(e.target.value)}
-                    placeholder="Enter your Gemini API key..."
-                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-medium focus:outline-none focus:ring-1 focus:ring-slate-900 focus:bg-white text-slate-900"
-                  />
-                  <button
-                    onClick={() => {
-                      localStorage.setItem("discovery_gemini_api_key", geminiApiKey);
-                      alert("Gemini API key updated!");
-                    }}
-                    className="px-4.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer"
-                  >
-                    Save Key
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-500 leading-normal pt-1">
-                  We use the Gemini API (e.g. <code>gemini-2.0-flash</code>) to rate and review submissions. Provide a key here or configure <code>VITE_GEMINI_API_KEY</code> in environment variables.
-                </p>
-              </div>
-
-              {/* Reset App data */}
-              <div className="border-t border-slate-100 pt-6 space-y-3">
-                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Danger Area
-                </div>
-                <button
-                  onClick={handleResetWorkspace}
-                  className="w-full py-3 border border-red-200 text-red-700 hover:bg-red-50 font-bold rounded-xl text-xs uppercase tracking-wider transition cursor-pointer"
-                >
-                  Clear Session & Reset App Progress
-                </button>
               </div>
             </div>
           )}

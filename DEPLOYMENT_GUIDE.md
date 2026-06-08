@@ -192,8 +192,8 @@ Header: [Syllabus] [Leaderboard] | User | Logout
 
 ## QUICK START CHECKLIST
 
-- [ ] **Accept the latest code update** (already waiting)
-- [ ] **Push to GitHub** - `git push origin main`
+- [x] **Accept the latest code update** (already pushed)
+- [x] **Push to GitHub** - Done
 - [ ] **Vercel auto-deploys** - Wait 2-5 minutes
 - [ ] **Visit your site** - https://product-discovery-21.vercel.app
 - [ ] **Test login** - Use any Name + Email
