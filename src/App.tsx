@@ -410,7 +410,7 @@ Return your response in raw JSON matching this format:
   "critique": "string (concise review, advice, and feedback)"
 }`;
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
         const response = await fetch(url, {
           method: "POST",
           headers: {
@@ -446,12 +446,12 @@ Return your response in raw JSON matching this format:
         console.error("Gemini API Error, falling back to local simulation:", err);
         // Fallback simulated review
         aiScore = Math.min(10, Math.max(4, Math.floor(Math.random() * 5) + 6));
-        aiCritique = `[Simulated Feedback - API Error] Good effort on the ${activeDay.title} challenge. You analyzed the principles correctly. Focus on structuring user interviews around past behaviors rather than hypothetical preferences.`;
+        aiCritique = `[Simulated Feedback - API Error] Good effort on the ${activeDay.title} challenge. You analyzed the principles correctly. Focus on structuring user interviews around past behavior patterns and desired outcomes. Consider incorporating data-driven insights into your analysis for stronger recommendations.`;
       }
     } else {
       // Mock grading if no API key is set
       aiScore = Math.min(10, Math.max(4, Math.floor(Math.random() * 5) + 6));
-      aiCritique = `[Offline Mode Mock Critique] You have structured your response well for Day ${activeDay.day}. Your understanding of "${activeDay.title}" is clear. To maximize PM capabilities, focus on mapping outcomes rather than launching raw features. Configure your Gemini API key in Settings for live reviews!`;
+      aiCritique = `[Offline Mode Mock Critique] You have structured your response well for Day ${activeDay.day}. Your understanding of "${activeDay.title}" is clear. To maximize PM capabilities, consider adding data-driven insights and user research methodology to strengthen your product discovery approach.`;
     }
 
     const dailyScore = calculatedStreak + aiScore;
@@ -795,7 +795,7 @@ Return your response in raw JSON matching this format:
                           <span>Graded Review Critique Log</span>
                         </div>
 
-                        <div className="p-4 bg-slate-900 text-indigo-200 rounded-2xl font-mono text-xs leading-relaxed border border-slate-950">
+                        <div className="p-4 bg-slate-900 text-indigo-200 rounded-2xl font-mono text-xs leading-relaxed border border-slate-950 max-h-[300px] overflow-y-auto">
                           {activeSubmission.aiCritique}
                           <div className="mt-4 pt-3 border-t border-slate-800 flex justify-between items-center text-[10px] text-emerald-400 font-bold">
                             <span>Score: {activeSubmission.aiScore} / 10</span>
@@ -813,7 +813,7 @@ Return your response in raw JSON matching this format:
                         onChange={(e) => setSubmissionText(e.target.value)}
                         placeholder="Write your assignment solution here (minimum 25 characters)..."
                         rows={6}
-                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs focus:outline-none focus:ring-1 focus:ring-slate-950 focus:bg-white text-slate-900 transition-all font-medium resize-none leading-relaxed"
+                        className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl text-xs focus:outline-none focus:ring-1 focus:ring-slate-950 focus:bg-white text-slate-900 transition disabled:bg-slate-100 disabled:cursor-not-allowed"
                       />
 
                       <div className="flex justify-between items-center pt-2">
@@ -824,7 +824,7 @@ Return your response in raw JSON matching this format:
                         <button
                           onClick={getAISubmissionReview}
                           disabled={aiLoading || submissionText.trim().length < 25}
-                          className="px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed font-bold rounded-xl text-xs uppercase tracking-wider transition flex items-center gap-2 cursor-pointer"
+                          className="px-6 py-3 bg-slate-900 hover:bg-slate-800 text-white disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed font-bold rounded-xl text-xs uppercase tracking-wider transition flex items-center gap-2"
                         >
                           {aiLoading ? (
                             <>
@@ -940,7 +940,7 @@ Return your response in raw JSON matching this format:
                   <div className="pt-2 text-[10px] text-slate-500 leading-normal flex gap-1.5 items-start">
                     <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
                     <span>
-                      Supabase environment variables are missing. App falls back to local storage automatically. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local` to enable real backend sync.
+                      Supabase environment variables are missing. App falls back to local storage automatically. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in `.env.local` to enable real sync features.
                     </span>
                   </div>
                 )}
@@ -988,7 +988,7 @@ Return your response in raw JSON matching this format:
                   </button>
                 </div>
                 <p className="text-[10px] text-slate-500 leading-normal pt-1">
-                  We use the Gemini API (e.g. <code>gemini-2.5-flash</code>) to rate and review submissions. Provide a key here or configure <code>VITE_GEMINI_API_KEY</code> in environment variables. If left blank, mock reviews are generated for testing.
+                  We use the Gemini API (e.g. <code>gemini-2.0-flash</code>) to rate and review submissions. Provide a key here or configure <code>VITE_GEMINI_API_KEY</code> in environment variables.
                 </p>
               </div>
 
