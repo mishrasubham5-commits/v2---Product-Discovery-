@@ -1,0 +1,6 @@
+{
+  "name": "Product Discovery Curriculum",
+  "description": "A 50-day interactive curriculum and portfolio builder for mastering product discovery.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
