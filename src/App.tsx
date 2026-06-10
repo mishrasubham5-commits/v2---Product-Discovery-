@@ -35,6 +35,12 @@ export default function App() {
 
   const [dbProfiles, setDbProfiles] = useState<UserProfile[]>([]);
 
+  // Track ALL logged-in users for leaderboard
+  const [localUsers, setLocalUsers] = useState<UserProfile[]>(() => {
+    const saved = localStorage.getItem("discovery_local_users");
+    return saved ? JSON.parse(saved) : [];
+  });
+
   // Onboarding/Login loading states
   const [authLoading, setAuthLoading] = useState(false);
   const [isMagicLinkSent, setIsMagicLinkSent] = useState(false);
@@ -73,6 +79,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("discovery_gemini_api_key", geminiApiKey);
   }, [geminiApiKey]);
+
+  useEffect(() => {
+    localStorage.setItem("discovery_local_users", JSON.stringify(localUsers));
+  }, [localUsers]);
 
   // --- PARSE CALLBACK REDIRECT / SIMULATED URL ON CLIENT START ---
   useEffect(() => {
@@ -207,7 +217,7 @@ export default function App() {
         .single();
 
       if (insertedData) {
-        setProfile({
+        const userProfile: UserProfile = {
           id: insertedData.id,
           name: insertedData.name,
           email: insertedData.email,
@@ -216,11 +226,18 @@ export default function App() {
           daysCompleted: insertedData.days_completed,
           lastSubmissionDate: insertedData.last_submission_date,
           joinedAt: insertedData.created_at
+        };
+        setProfile(userProfile);
+        
+        // Also add to local leaderboard
+        setLocalUsers(prev => {
+          const filtered = prev.filter(u => u.email !== email);
+          return [...filtered, userProfile];
         });
       }
     } else {
       // Profile exists, load it
-      setProfile({
+      const userProfile: UserProfile = {
         id: data.id,
         name: data.name,
         email: data.email,
@@ -229,6 +246,13 @@ export default function App() {
         daysCompleted: data.days_completed,
         lastSubmissionDate: data.last_submission_date,
         joinedAt: data.created_at
+      };
+      setProfile(userProfile);
+
+      // Also add to local leaderboard
+      setLocalUsers(prev => {
+        const filtered = prev.filter(u => u.email !== email);
+        return [...filtered, userProfile];
       });
 
       // Load submissions
@@ -319,8 +343,9 @@ export default function App() {
     if (!name) name = "Product Manager";
     if (!email) email = "pm@example.com";
 
+    const userId = "local_user_" + Date.now();
     const mockProfile: UserProfile = {
-      id: "mock_user_" + Date.now(),
+      id: userId,
       name,
       email,
       streak: 1,
@@ -329,6 +354,13 @@ export default function App() {
       lastSubmissionDate: null,
       joinedAt: new Date().toISOString()
     };
+
+    // Add user to local leaderboard tracking
+    setLocalUsers(prev => {
+      // Remove existing entry for this email if exists (in case of re-login)
+      const filtered = prev.filter(u => u.email !== email);
+      return [...filtered, mockProfile];
+    });
 
     setSessionUser({ email, name });
     setProfile(mockProfile);
@@ -379,23 +411,36 @@ export default function App() {
 
     if (geminiApiKey) {
       try {
-        const prompt = `You are an expert Product Discovery Mentor.
-Evaluate the user's submission for Day ${activeDay.day} of the 21-Day Product Discovery Challenge.
+        const prompt = `You are an expert Product Discovery Mentor helping a candidate prepare for Product Manager interviews.
 
-Topic: ${activeDay.title}
-Assignment Prompt: ${activeDay.assignmentPrompt}
-User's Submission: ${userText}
+## CONTEXT
+- This is Day ${activeDay.day} of a 21-Day Product Discovery Challenge
+- Topic: ${activeDay.title}
+- Assignment: ${activeDay.assignmentPrompt}
+- User's Submission: ${userText}
 
-Evaluate the response based on the following criteria:
-- Understanding of concept
-- Critical thinking
-- Quality of response
-- Product discovery skills
+## YOUR TASK
+Act as a senior PM who conducts product interviews. Provide a comprehensive review that:
+1. Identifies STRENGTHS in their answer (what they got right)
+2. Identifies AREAS FOR IMPROVEMENT (what's missing or could be better)
+3. Provides a SAMPLE EXCELLENT ANSWER they could use as a reference
+4. Gives 2-3 SPECIFIC TIPS for interview success on this topic
+5. Rates their PM thinking on a scale of 1-10
 
-Return your response in raw JSON matching this format:
+## IMPORTANT
+- Be specific and constructive, not generic
+- Connect your feedback to actual PM interview scenarios
+- Use examples from top tech companies (Google, Amazon, Meta, Netflix, Airbnb, etc.)
+- Focus on structured thinking, user-centricity, and business impact
+
+## OUTPUT FORMAT (JSON only, no markdown)
 {
-  "score": number (integer 0 to 10),
-  "critique": "string (concise review, advice, and feedback)"
+  "strengths": ["strength 1", "strength 2", "strength 3"],
+  "areasForImprovement": ["improvement 1", "improvement 2", "improvement 3"],
+  "sampleAnswer": "A detailed example excellent answer...",
+  "interviewTips": ["tip 1", "tip 2", "tip 3"],
+  "score": number (1-10),
+  "overallFeedback": "A concise 2-3 sentence summary"
 }`;
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
@@ -407,7 +452,9 @@ Return your response in raw JSON matching this format:
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
             generationConfig: {
-              responseMimeType: "application/json"
+              responseMimeType: "application/json",
+              temperature: 0.7,
+              maxOutputTokens: 2048
             }
           })
         });
@@ -425,21 +472,76 @@ Return your response in raw JSON matching this format:
           cleanedText = cleanedText.trim();
 
           const parsed = JSON.parse(cleanedText);
-          aiScore = Math.max(0, Math.min(10, Number(parsed.score) || 7));
-          aiCritique = parsed.critique || "Excellent work. You have demonstrated solid comprehension.";
+          
+          // Format a comprehensive critique from structured response
+          const strengths = Array.isArray(parsed.strengths) ? parsed.strengths.join('\n• ') : '';
+          const improvements = Array.isArray(parsed.areasForImprovement) ? parsed.areasForImprovement.join('\n• ') : '';
+          const tips = Array.isArray(parsed.interviewTips) ? parsed.interviewTips.join('\n• ') : '';
+          
+          aiCritique = `## STRENGTHS
+• ${strengths}
+
+## AREAS FOR IMPROVEMENT
+• ${improvements}
+
+## SAMPLE EXCELLENT ANSWER
+${parsed.sampleAnswer || 'Not provided'}
+
+## INTERVIEW TIPS
+• ${tips}
+
+## OVERALL FEEDBACK
+${parsed.overallFeedback || 'Good effort! Keep practicing.'}`;
+
+          aiScore = Math.max(1, Math.min(10, Number(parsed.score) || 7));
         } else {
           throw new Error(`Gemini API returned status code ${response.status}`);
         }
       } catch (err: any) {
         console.error("Gemini API Error, falling back to local simulation:", err);
-        // Fallback simulated review
-        aiScore = Math.min(10, Math.max(4, Math.floor(Math.random() * 5) + 6));
-        aiCritique = `[Simulated Feedback - API Error] Good effort on the ${activeDay.title} challenge. You analyzed the principles correctly. Focus on structuring user interviews around past behavior patterns and desired outcomes.`;
+        // Fallback with meaningful feedback when API fails
+        aiScore = 7;
+        aiCritique = `## REVIEW (Offline Mode - API Unavailable)
+
+### Your Answer for Day ${activeDay.day}: ${activeDay.title}
+
+Great start! While the AI review service is temporarily unavailable, here's what to focus on:
+
+**Key Points to Cover:**
+• Structure your answer using frameworks (STAR, PREP, or SCQA)
+• Connect to real user problems and business impact
+• Show data-driven thinking where possible
+• Demonstrate customer empathy and insights
+
+**For "${activeDay.title}", consider:**
+• What user problem does this solve?
+• How would you measure success?
+• What would you do differently from competitors?
+
+Keep practicing and resubmit when the AI service is back online!`;
       }
     } else {
-      // Mock grading if no API key is set
-      aiScore = Math.min(10, Math.max(4, Math.floor(Math.random() * 5) + 6));
-      aiCritique = `[Offline Mode Mock Critique] You have structured your response well for Day ${activeDay.day}. Your understanding of \"${activeDay.title}\" is clear. To maximize PM capabilities, consider adding data-driven insights and user research methodology.`;
+      // Mock grading if no API key is set - but provide meaningful guidance
+      aiScore = 7;
+      aiCritique = `## SETUP REQUIRED: Gemini API Key Needed
+
+To receive personalized AI feedback on your PM interview prep, you need to set up a free Gemini API key:
+
+### How to Get Your Free API Key:
+1. Go to https://aistudio.google.com/
+2. Sign in with your Google account
+3. Click "Get API Key" in the left sidebar
+4. Create a new API key (free tier: 15 requests/min, 1500 requests/day)
+5. Copy the key and paste it in the settings
+
+### Why This Matters:
+With Gemini API, you'll receive:
+• Detailed strengths and weaknesses analysis
+• Sample excellent answers from real PM interviews  
+• Specific tips for this topic
+• Scores to track your progress
+
+**Your answer has been saved locally. Once you add the API key, you can resubmit to get full feedback!**`;
     }
 
     const dailyScore = calculatedStreak + aiScore;
@@ -513,7 +615,7 @@ Return your response in raw JSON matching this format:
 
   // --- LEADERBOARD & RANK CALCULATIONS ---
   const computedLeaderboard = useMemo<CustomLeaderboardEntry[]>(() => {
-    if (!profile) return MOCK_LEADERBOARD;
+    if (!profile) return [];
 
     const userEntry: CustomLeaderboardEntry = {
       id: profile.id,
@@ -541,8 +643,20 @@ Return your response in raw JSON matching this format:
         list.push(userEntry);
       }
     } else {
-      // Use mock leaderboard
-      list = [...MOCK_LEADERBOARD.filter(item => item.id !== profile.id), userEntry];
+      // Use local users instead of mock leaderboard
+      list = localUsers
+        .filter(u => u.email !== profile.email) // Remove current user (we'll add them separately)
+        .map((u) => ({
+          id: u.id,
+          name: u.name,
+          streak: u.streak,
+          totalScore: u.totalScore,
+          daysCompleted: u.daysCompleted,
+          isCurrentUser: false
+        }));
+      
+      // Add current user at the beginning
+      list.unshift(userEntry);
     }
 
     return list.sort((a, b) => {
@@ -550,7 +664,7 @@ Return your response in raw JSON matching this format:
       if (b.streak !== a.streak) return b.streak - a.streak;
       return b.daysCompleted - a.daysCompleted;
     });
-  }, [profile, dbProfiles]);
+  }, [profile, dbProfiles, localUsers]);
 
   const currentRank = useMemo(() => {
     if (!profile) return 0;
@@ -837,53 +951,67 @@ Return your response in raw JSON matching this format:
                 </p>
               </div>
 
-              <div className="overflow-x-auto border border-slate-100 rounded-2xl">
-                <table className="w-full text-xs text-left border-collapse">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase font-mono font-extrabold border-b border-slate-100">
-                      <th className="py-3 px-4 text-center">Rank</th>
-                      <th className="py-3 px-4">PM Name</th>
-                      <th className="py-3 px-4 text-center">Current Streak</th>
-                      <th className="py-3 px-4 text-center">Days Completed</th>
-                      <th className="py-3 px-4 text-right">Total Score</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                    {computedLeaderboard.map((item, index) => {
-                      const isUser = item.isCurrentUser;
-                      return (
-                        <tr
-                          key={item.id}
-                          className={`hover:bg-slate-50/50 transition-colors ${
-                            isUser ? "bg-slate-50 text-slate-900 font-bold border-l-4 border-slate-900" : ""
-                          }`}
-                        >
-                          <td className="py-3.5 px-4 text-center font-mono font-extrabold text-slate-900">
-                            #{index + 1}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className="font-display font-extrabold text-[11px] uppercase tracking-tight">
-                              {item.name}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-center font-mono font-bold text-slate-700">
-                            <span className="inline-flex items-center gap-1">
-                              <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 stroke-none" />
-                              {item.streak}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-center font-mono text-slate-500">
-                            {item.daysCompleted} / 21
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                            {item.totalScore} pts
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              {computedLeaderboard.length <= 1 ? (
+                <div className="text-center py-12 px-6 bg-slate-50 rounded-2xl border border-slate-200">
+                  <div className="text-4xl mb-3">🏆</div>
+                  <h4 className="font-bold text-slate-900 mb-2">You're the first one here!</h4>
+                  <p className="text-sm text-slate-500 max-w-sm mx-auto">
+                    Share the app with other aspiring PMs to see the full leaderboard. 
+                    Complete challenges to climb to the top!
+                  </p>
+                </div>
+              ) : (
+                <div className="overflow-x-auto border border-slate-100 rounded-2xl">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-400 text-[10px] uppercase font-mono font-extrabold border-b border-slate-100">
+                        <th className="py-3 px-4 text-center">Rank</th>
+                        <th className="py-3 px-4">PM Name</th>
+                        <th className="py-3 px-4 text-center">Current Streak</th>
+                        <th className="py-3 px-4 text-center">Days Completed</th>
+                        <th className="py-3 px-4 text-right">Total Score</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
+                      {computedLeaderboard.map((item, index) => {
+                        const isUser = item.isCurrentUser;
+                        return (
+                          <tr
+                            key={item.id}
+                            className={`hover:bg-slate-50/50 transition-colors ${
+                              isUser ? "bg-slate-50 text-slate-900 font-bold border-l-4 border-slate-900" : ""
+                            }`}
+                          >
+                            <td className="py-3.5 px-4 text-center font-mono font-extrabold text-slate-900">
+                              #{index + 1}
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="flex flex-col">
+                                <span className="font-display font-extrabold text-[11px] uppercase tracking-tight">
+                                  {item.name}
+                                </span>
+                                {isUser && <span className="text-[9px] text-slate-400">You</span>}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-center font-mono font-bold text-slate-700">
+                              <span className="inline-flex items-center gap-1">
+                                <Flame className="w-3.5 h-3.5 text-amber-500 fill-amber-500 stroke-none" />
+                                {item.streak}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 text-center font-mono text-slate-500">
+                              {item.daysCompleted} / 21
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
+                              {item.totalScore} pts
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
 

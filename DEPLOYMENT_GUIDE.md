@@ -202,11 +202,129 @@ Header: [Syllabus] [Leaderboard] | User | Logout
 
 ---
 
+## 6. IMPROVED AI FEEDBACK SYSTEM
+
+### What's New ✅
+
+The AI review now provides **comprehensive PM interview-style feedback**:
+
+1. **STRENGTHS** - What you did well
+2. **AREAS FOR IMPROVEMENT** - What to work on
+3. **SAMPLE EXCELLENT ANSWER** - Reference answer for interviews
+4. **INTERVIEW TIPS** - Specific tips for this topic
+5. **OVERALL FEEDBACK** - Summary
+
+### How to Get AI Reviews
+
+1. **Get a Free Gemini API Key**:
+   - Go to https://aistudio.google.com/
+   - Sign in with Google
+   - Click "Get API Key" → Create new key
+   - Free tier: 15 requests/min, 1,500 requests/day
+
+2. **Add API Key to Your App**:
+   - Create a `.env.local` file in the project root
+   - Add: `VITE_GEMINI_API_KEY=your_api_key_here`
+   - Restart the dev server
+
+3. **Without API Key**:
+   - App shows setup instructions
+   - Answer saved locally - resubmit after adding key
+
+---
+
+## 7. LEADERBOARD - SEE ALL USERS
+
+### How It Works Now ✅
+
+**Without Supabase (Current - Local Mode)**:
+- All users who log in on the SAME browser are tracked
+- Leaderboard shows all users from that browser
+- Perfect for testing/development
+
+**With Supabase (Production)**:
+- ALL users across ALL devices appear in leaderboard
+- Persistent data - survives browser clear
+- See real names and scores of all participants
+
+### To Enable Full Leaderboard with Supabase:
+
+**Step 1: Create Supabase Project**
+1. Go to https://supabase.com
+2. Create new project (free tier)
+3. Wait for database to provision (~2 min)
+
+**Step 2: Setup Database Tables**
+1. In Supabase Dashboard → SQL Editor
+2. Run the migration from `supabase/migrations/001_setup_schema.sql`
+3. This creates `profiles` and `submissions` tables
+
+**Step 3: Get Your API Keys**
+1. Go to Supabase Dashboard → Project Settings → API
+2. Find:
+   - `Project URL` → copy
+   - `anon public` key → copy
+
+**Step 4: Add to Your App**
+Create `.env.local` in project root:
+```
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_ANON_KEY=your_anon_key_here
+VITE_GEMINI_API_KEY=your_gemini_key_here
+```
+
+**Step 5: Commit and Push**
+```bash
+git add .
+git commit -m "feat: Enable Supabase for full leaderboard"
+git push origin main
+```
+
+### What You'll See in Supabase Dashboard:
+
+**Profiles Table** - All logged-in users:
+| id | name | email | current_streak | total_score | days_completed |
+|----|------|-------|----------------|-------------|----------------|
+| uuid | John Doe | john@email.com | 5 | 85 | 7 |
+
+**Submissions Table** - All submissions:
+| id | user_id | day | title | ai_score | submission_text |
+|----|---------|-----|-------|----------|-----------------|
+
+---
+
+## 8. VIEWING USER DATA IN SUPABASE
+
+### To See All Users Who Logged In:
+
+1. Go to https://supabase.com
+2. Select your project
+3. Click **Table Editor** in left sidebar
+4. Select **profiles** table
+5. You'll see ALL users with:
+   - Name
+   - Email
+   - Streak count
+   - Total score
+   - Days completed
+
+### To See All Submissions:
+
+1. Select **submissions** table
+2. See every user's AI review results
+
+### To Export Data:
+
+1. Click **Download** button on any table
+2. Export as CSV for analysis in Excel/Sheets
+
+---
+
 ## QUESTIONS TO ASK NEXT
 
-1. Want to add **multiple users to same leaderboard**?
-2. Want to **save data to Supabase** (persistent across devices)?
-3. Want to **customize Gemini API key** per user?
-4. Want to **send emails** with progress updates?
+1. Want to add **email notifications** when new users join?
+2. Want to **export leaderboard data** as PDF?
+3. Want to **add admin panel** to manage users?
+4. Want to **customize the branding** for your organization?
 
 Let me know! 🚀
