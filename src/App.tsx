@@ -22,19 +22,67 @@ const UUID_PATTERN =
 const isUuid = (value: string | null | undefined) =>
   typeof value === "string" && UUID_PATTERN.test(value);
 
+const getGeminiErrorMessage = (status: number) => {
+  switch (status) {
+    case 400:
+      return "Gemini rejected the request. Check that the selected model and request format are valid.";
+    case 401:
+    case 403:
+      return "Gemini authentication failed. Add a valid Gemini API key to enable live AI reviews.";
+    case 429:
+      return "Gemini rate limit was reached for the current API key. Add your own Gemini API key or try again later.";
+    default:
+      return `Gemini API returned status code ${status}.`;
+  }
+};
+
+const formatAiCritique = (parsed: {
+  strengths?: string[];
+  areasForImprovement?: string[];
+  sampleAnswer?: string;
+  interviewTips?: string[];
+  overallFeedback?: string;
+}) => {
+  const strengths = Array.isArray(parsed.strengths) ? parsed.strengths.join("\n• ") : "";
+  const improvements = Array.isArray(parsed.areasForImprovement) ? parsed.areasForImprovement.join("\n• ") : "";
+  const tips = Array.isArray(parsed.interviewTips) ? parsed.interviewTips.join("\n• ") : "";
+
+  return `## STRENGTHS
+• ${strengths}
+
+## AREAS FOR IMPROVEMENT
+• ${improvements}
+
+## SAMPLE EXCELLENT ANSWER
+${parsed.sampleAnswer || "Not provided"}
+
+## INTERVIEW TIPS
+• ${tips}
+
+## OVERALL FEEDBACK
+${parsed.overallFeedback || "Good effort! Keep practicing."}`;
+};
+
+const isLocalhost = () => {
+  if (typeof window === "undefined") return false;
+  return ["localhost", "127.0.0.1"].includes(window.location.hostname);
+};
+
 export default function App() {
   // --- AUTH & PROFILE STATES ---
   const [sessionUser, setSessionUser] = useState<{ email: string; name: string } | null>(() => {
     const saved = localStorage.getItem("discovery_session_user");
     return saved ? JSON.parse(saved) : null;
   });
+  const useLocalAuth = isLocalhost();
+  const useSupabaseAuth = isSupabaseConfigured && !!supabase && !useLocalAuth;
 
   const [profile, setProfile] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem("discovery_profile");
     if (!saved) return null;
 
     const parsed = JSON.parse(saved) as UserProfile;
-    if (isSupabaseConfigured && !isUuid(parsed.id)) {
+    if (isSupabaseConfigured && !useLocalAuth && !isUuid(parsed.id)) {
       localStorage.removeItem("discovery_profile");
       return null;
     }
@@ -68,6 +116,9 @@ export default function App() {
   const [geminiApiKey, setGeminiApiKey] = useState(() => {
     return localStorage.getItem("discovery_gemini_api_key") || import.meta.env.VITE_GEMINI_API_KEY || "";
   });
+  const hasGeminiApiKey = geminiApiKey.trim().length > 0;
+  const useLocalApiReview = isLocalhost();
+  const useServerAiReview = isSupabaseConfigured && !!supabase && !useLocalAuth;
 
   // --- SYNC STATE TO LOCAL STORAGE ---
   useEffect(() => {
@@ -100,7 +151,7 @@ export default function App() {
 
   // --- PARSE CALLBACK REDIRECT / SIMULATED URL ON CLIENT START ---
   useEffect(() => {
-    if (isSupabaseConfigured) return;
+    if (isSupabaseConfigured && !useLocalAuth) return;
 
     const searchParams = new URLSearchParams(window.location.search);
     const token = searchParams.get("token");
@@ -144,11 +195,11 @@ export default function App() {
       // Reset URL path
       window.history.replaceState({}, document.title, window.location.origin);
     }
-  }, []);
+  }, [useLocalAuth]);
 
   // --- SUPABASE DATA FETCH & SYNC ---
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!useSupabaseAuth || !supabase) return;
 
     // Check active Supabase auth session
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -174,11 +225,11 @@ export default function App() {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [useSupabaseAuth]);
 
   // Fetch Supabase leaderboard profiles
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || !sessionUser) return;
+    if (!useSupabaseAuth || !supabase || !sessionUser) return;
 
     const fetchProfiles = async () => {
       const { data, error } = await supabase
@@ -203,7 +254,7 @@ export default function App() {
     };
 
     fetchProfiles();
-  }, [sessionUser, profile]);
+  }, [sessionUser, profile, useSupabaseAuth]);
 
   const syncUserProfile = async (userId: string, name: string, email: string) => {
     if (!supabase) return;
@@ -313,7 +364,7 @@ export default function App() {
     // Always preserve onboarding credentials to support direct sandbox fallback link
     localStorage.setItem("discovery_temp_onboard", JSON.stringify({ name, email }));
 
-    if (isSupabaseConfigured && supabase) {
+    if (useSupabaseAuth && supabase) {
       try {
         const { error } = await supabase.auth.signInWithOtp({
           email,
@@ -340,7 +391,7 @@ export default function App() {
   };
 
   const simulateMagicLinkClick = (fallbackName?: string, fallbackEmail?: string) => {
-    if (isSupabaseConfigured) return;
+    if (isSupabaseConfigured && !useLocalAuth) return;
 
     let name = fallbackName || "";
     let email = fallbackEmail || "";
@@ -387,7 +438,7 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
-    if (isSupabaseConfigured && supabase) {
+    if (useSupabaseAuth && supabase) {
       await supabase.auth.signOut();
     } else {
       handleSignOutCleanup();
@@ -399,37 +450,136 @@ export default function App() {
     if (!profile) return;
     setAiLoading(true);
     setErrorMessage(null);
+    try {
+      const activeDay = CURRICULUM.find((d) => d.day === selectedDayNum) || CURRICULUM[0];
+      const userText = submissionText.trim();
 
-    const activeDay = CURRICULUM.find((d) => d.day === selectedDayNum) || CURRICULUM[0];
-    const userText = submissionText.trim();
+      // 1. Calculate the streak logic
+      let calculatedStreak = profile.streak;
+      if (profile.lastSubmissionDate) {
+        const lastDate = new Date(profile.lastSubmissionDate);
+        const today = new Date();
 
-    // 1. Calculate the streak logic
-    let calculatedStreak = profile.streak;
-    if (profile.lastSubmissionDate) {
-      const lastDate = new Date(profile.lastSubmissionDate);
-      const today = new Date();
+        const lastMidnight = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
+        const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
-      const lastMidnight = new Date(lastDate.getFullYear(), lastDate.getMonth(), lastDate.getDate());
-      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+        const diffTime = todayMidnight.getTime() - lastMidnight.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
 
-      const diffTime = todayMidnight.getTime() - lastMidnight.getTime();
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-      if (diffDays === 1) {
-        calculatedStreak += 1;
-      } else if (diffDays > 1) {
-        calculatedStreak = 1; // Missed day logic: reset streak to 1
+        if (diffDays === 1) {
+          calculatedStreak += 1;
+        } else if (diffDays > 1) {
+          calculatedStreak = 1; // Missed day logic: reset streak to 1
+        }
+      } else {
+        calculatedStreak = 1;
       }
-    } else {
-      calculatedStreak = 1;
-    }
 
-    let aiScore = 7;
-    let aiCritique = "";
+      let aiScore = 7;
+      let aiCritique = "";
 
-    if (geminiApiKey) {
-      try {
-        const prompt = `You are an expert Product Discovery Mentor helping a candidate prepare for Product Manager interviews.
+      if (useLocalApiReview) {
+        try {
+          const response = await fetch("/api/ai-review", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              day: activeDay.day,
+              title: activeDay.title,
+              assignmentPrompt: activeDay.assignmentPrompt,
+              submissionText: userText
+            })
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data?.error || "Local AI review request failed.");
+          }
+
+          aiCritique = formatAiCritique(data);
+          aiScore = Math.max(1, Math.min(10, Number(data.score) || 7));
+
+          if (data?.source && data.source !== "local-vite-api") {
+            setErrorMessage(
+              data?.backendError
+                ? `Local API fallback mode: ${data.backendError}`
+                : "Local API is running in fallback mode. Add a valid Gemini API key later if you want live AI output."
+            );
+          }
+        } catch (err: any) {
+          console.error("Local API error, falling back to local simulation:", err);
+          setErrorMessage(`${err.message || "Local AI review is currently unavailable."} Showing offline review instead.`);
+
+          aiScore = 7;
+          aiCritique = `## REVIEW (Offline Mode - Local API Unavailable)
+
+### Your Answer for Day ${activeDay.day}: ${activeDay.title}
+
+The local API could not complete the review. While that is being fixed, focus on:
+
+**Key Points to Cover:**
+• Clarify the user problem before describing the solution
+• Add a measurable success metric
+• Show product trade-offs and risks
+• Structure the answer using a clear interview framework
+
+Try again after refreshing the page or restarting the local dev server.`;
+        }
+      } else if (useServerAiReview) {
+        try {
+          if (!isUuid(profile.id)) {
+            throw new Error("Your session is not linked to a valid Supabase user yet. Please sign out and sign in again.");
+          }
+
+          const { data, error } = await supabase.functions.invoke("ai-review", {
+            body: {
+              day: activeDay.day,
+              title: activeDay.title,
+              assignmentPrompt: activeDay.assignmentPrompt,
+              submissionText: userText
+            }
+          });
+
+          if (error) {
+            throw new Error(error.message || "Supabase AI review request failed.");
+          }
+
+          if (!data || typeof data !== "object") {
+            throw new Error("Supabase AI review returned an invalid response.");
+          }
+
+          aiCritique = formatAiCritique(data);
+          aiScore = Math.max(1, Math.min(10, Number(data.score) || 7));
+        } catch (err: any) {
+          console.error("Supabase Edge Function error, falling back to local simulation:", err);
+          setErrorMessage(`${err.message || "Supabase AI review is currently unavailable."} Showing offline review instead.`);
+
+          aiScore = 7;
+          aiCritique = `## REVIEW (Offline Mode - Backend Unavailable)
+
+### Your Answer for Day ${activeDay.day}: ${activeDay.title}
+
+The Supabase AI review function is not available right now. While that is being fixed, focus on:
+
+**Key Points to Cover:**
+• Lead with the user problem before proposing a solution
+• Use a structured interview framework
+• Include success metrics and business impact
+• Show trade-offs, risks, and validation steps
+
+**Before you resubmit, check:**
+• Is your answer grounded in a real customer pain point?
+• Did you explain how you would measure success?
+• Did you mention alternatives or competing approaches?
+
+Once the backend function is deployed with a valid Gemini secret, resubmit to get the full AI review.`;
+        }
+      } else if (hasGeminiApiKey) {
+        try {
+          const prompt = `You are an expert Product Discovery Mentor helping a candidate prepare for Product Manager interviews.
 
 ## CONTEXT
 - This is Day ${activeDay.day} of a 21-Day Product Discovery Challenge
@@ -461,65 +611,47 @@ Act as a senior PM who conducts product interviews. Provide a comprehensive revi
   "overallFeedback": "A concise 2-3 sentence summary"
 }`;
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
-        const response = await fetch(url, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              responseMimeType: "application/json",
-              temperature: 0.7,
-              maxOutputTokens: 2048
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`;
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                responseMimeType: "application/json",
+                temperature: 0.7,
+                maxOutputTokens: 2048
+              }
+            })
+          });
+
+          if (response.ok) {
+            const resJson = await response.json();
+            const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || "";
+            
+            // Safely strip off any markdown wrap e.g., ```json ... ```
+            let cleanedText = responseText.trim();
+            if (cleanedText.startsWith("```")) {
+              cleanedText = cleanedText.replace(/^```[a-zA-Z]*\s*/, "");
+              cleanedText = cleanedText.replace(/\s*```$/, "");
             }
-          })
-        });
+            cleanedText = cleanedText.trim();
 
-        if (response.ok) {
-          const resJson = await response.json();
-          const responseText = resJson.candidates?.[0]?.content?.parts?.[0]?.text || "";
-          
-          // Safely strip off any markdown wrap e.g., ```json ... ```
-          let cleanedText = responseText.trim();
-          if (cleanedText.startsWith("```")) {
-            cleanedText = cleanedText.replace(/^```[a-zA-Z]*\s*/, "");
-            cleanedText = cleanedText.replace(/\s*```$/, "");
+            const parsed = JSON.parse(cleanedText);
+            aiCritique = formatAiCritique(parsed);
+            aiScore = Math.max(1, Math.min(10, Number(parsed.score) || 7));
+          } else {
+            throw new Error(getGeminiErrorMessage(response.status));
           }
-          cleanedText = cleanedText.trim();
+        } catch (err: any) {
+          console.error("Gemini API Error, falling back to local simulation:", err);
+          setErrorMessage(`${err.message || "Gemini AI review is currently unavailable."} Showing offline review instead.`);
 
-          const parsed = JSON.parse(cleanedText);
-          
-          // Format a comprehensive critique from structured response
-          const strengths = Array.isArray(parsed.strengths) ? parsed.strengths.join('\n• ') : '';
-          const improvements = Array.isArray(parsed.areasForImprovement) ? parsed.areasForImprovement.join('\n• ') : '';
-          const tips = Array.isArray(parsed.interviewTips) ? parsed.interviewTips.join('\n• ') : '';
-          
-          aiCritique = `## STRENGTHS
-• ${strengths}
-
-## AREAS FOR IMPROVEMENT
-• ${improvements}
-
-## SAMPLE EXCELLENT ANSWER
-${parsed.sampleAnswer || 'Not provided'}
-
-## INTERVIEW TIPS
-• ${tips}
-
-## OVERALL FEEDBACK
-${parsed.overallFeedback || 'Good effort! Keep practicing.'}`;
-
-          aiScore = Math.max(1, Math.min(10, Number(parsed.score) || 7));
-        } else {
-          throw new Error(`Gemini API returned status code ${response.status}`);
-        }
-      } catch (err: any) {
-        console.error("Gemini API Error, falling back to local simulation:", err);
-        // Fallback with meaningful feedback when API fails
-        aiScore = 7;
-        aiCritique = `## REVIEW (Offline Mode - API Unavailable)
+          // Fallback with meaningful feedback when API fails
+          aiScore = 7;
+          aiCritique = `## REVIEW (Offline Mode - API Unavailable)
 
 ### Your Answer for Day ${activeDay.day}: ${activeDay.title}
 
@@ -537,11 +669,13 @@ Great start! While the AI review service is temporarily unavailable, here's what
 • What would you do differently from competitors?
 
 Keep practicing and resubmit when the AI service is back online!`;
-      }
-    } else {
-      // Mock grading if no API key is set - but provide meaningful guidance
-      aiScore = 7;
-      aiCritique = `## SETUP REQUIRED: Gemini API Key Needed
+        }
+      } else {
+        setErrorMessage("Gemini API key is not set. Add your key below to enable live AI reviews.");
+
+        // Mock grading if no API key is set - but provide meaningful guidance
+        aiScore = 7;
+        aiCritique = `## SETUP REQUIRED: Gemini API Key Needed
 
 To receive personalized AI feedback on your PM interview prep, you need to set up a free Gemini API key:
 
@@ -560,77 +694,78 @@ With Gemini API, you'll receive:
 • Scores to track your progress
 
 **Your answer has been saved locally. Once you add the API key, you can resubmit to get full feedback!**`;
-    }
-
-    const dailyScore = calculatedStreak + aiScore;
-
-    // Create submission item
-    const newSubmission: SubmissionItem = {
-      id: "sub_" + Date.now(),
-      userId: profile.id,
-      day: selectedDayNum,
-      title: activeDay.title,
-      submittedAt: new Date().toISOString(),
-      submissionText: userText,
-      aiScore,
-      aiCritique,
-      dailyScore
-    };
-
-    const updatedSubmissions = [...submissions.filter(s => s.day !== selectedDayNum), newSubmission];
-
-    // Calculate new total score
-    const totalScore = updatedSubmissions.reduce((sum, s) => sum + s.dailyScore, 0);
-    const daysCompleted = updatedSubmissions.length;
-
-    const updatedProfile: UserProfile = {
-      ...profile,
-      streak: calculatedStreak,
-      totalScore,
-      daysCompleted,
-      lastSubmissionDate: new Date().toISOString()
-    };
-
-    // Save to State
-    setSubmissions(updatedSubmissions);
-    setProfile(updatedProfile);
-    setSubmissionText("");
-
-    // Sync to Supabase
-    if (isSupabaseConfigured && supabase && isUuid(profile.id)) {
-      try {
-        // Save submission
-        await supabase.from("submissions").insert([
-          {
-            user_id: profile.id,
-            day: selectedDayNum,
-            title: activeDay.title,
-            submission_text: userText,
-            ai_score: aiScore,
-            ai_critique: aiCritique,
-            daily_score: dailyScore
-          }
-        ]);
-
-        // Update profile
-        await supabase
-          .from("profiles")
-          .update({
-            current_streak: calculatedStreak,
-            total_score: totalScore,
-            days_completed: daysCompleted,
-            last_submission_date: new Date().toISOString()
-          })
-          .eq("id", profile.id);
-
-      } catch (dbErr) {
-        console.error("Database sync error:", dbErr);
       }
-    } else if (isSupabaseConfigured && !isUuid(profile.id)) {
-      console.error("Skipped Supabase sync because profile.id is not a valid auth UUID:", profile.id);
-    }
 
-    setAiLoading(false);
+      const dailyScore = calculatedStreak + aiScore;
+
+      // Create submission item
+      const newSubmission: SubmissionItem = {
+        id: "sub_" + Date.now(),
+        userId: profile.id,
+        day: selectedDayNum,
+        title: activeDay.title,
+        submittedAt: new Date().toISOString(),
+        submissionText: userText,
+        aiScore,
+        aiCritique,
+        dailyScore
+      };
+
+      const updatedSubmissions = [...submissions.filter(s => s.day !== selectedDayNum), newSubmission];
+
+      // Calculate new total score
+      const totalScore = updatedSubmissions.reduce((sum, s) => sum + s.dailyScore, 0);
+      const daysCompleted = updatedSubmissions.length;
+
+      const updatedProfile: UserProfile = {
+        ...profile,
+        streak: calculatedStreak,
+        totalScore,
+        daysCompleted,
+        lastSubmissionDate: new Date().toISOString()
+      };
+
+      // Save to State
+      setSubmissions(updatedSubmissions);
+      setProfile(updatedProfile);
+      setSubmissionText("");
+
+      // Sync to Supabase
+      if (isSupabaseConfigured && supabase && isUuid(profile.id)) {
+        try {
+          // Save submission
+          await supabase.from("submissions").insert([
+            {
+              user_id: profile.id,
+              day: selectedDayNum,
+              title: activeDay.title,
+              submission_text: userText,
+              ai_score: aiScore,
+              ai_critique: aiCritique,
+              daily_score: dailyScore
+            }
+          ]);
+
+          // Update profile
+          await supabase
+            .from("profiles")
+            .update({
+              current_streak: calculatedStreak,
+              total_score: totalScore,
+              days_completed: daysCompleted,
+              last_submission_date: new Date().toISOString()
+            })
+            .eq("id", profile.id);
+
+        } catch (dbErr) {
+          console.error("Database sync error:", dbErr);
+        }
+      } else if (isSupabaseConfigured && !isUuid(profile.id)) {
+        console.error("Skipped Supabase sync because profile.id is not a valid auth UUID:", profile.id);
+      }
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   // --- LEADERBOARD & RANK CALCULATIONS ---
@@ -709,8 +844,8 @@ With Gemini API, you'll receive:
         onLogin={handleLoginSubmit} 
         isLoading={authLoading}
         isMagicLinkSent={isMagicLinkSent} 
-        onSimulateMagicLink={isSupabaseConfigured ? undefined : simulateMagicLinkClick}
-        isSupabaseConfigured={isSupabaseConfigured}
+        onSimulateMagicLink={useSupabaseAuth ? undefined : simulateMagicLinkClick}
+        isSupabaseConfigured={useSupabaseAuth}
         errorMessage={errorMessage}
       />
     );
@@ -892,6 +1027,65 @@ With Gemini API, you'll receive:
                     <span className="text-[10px] font-bold text-indigo-800 uppercase tracking-wider">AI Assignment Prompt</span>
                     <p className="text-xs text-slate-700 leading-relaxed font-semibold">{activeDay.assignmentPrompt}</p>
                   </div>
+
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">AI Review Service</div>
+                        <p className="text-xs text-slate-600 mt-1">
+                          {useServerAiReview
+                            ? "Live AI review is routed through your Supabase Edge Function and uses the Gemini key stored in Supabase secrets."
+                            : useLocalApiReview
+                              ? "Local mode uses the built-in Vite API at /api/status and /api/ai-review so you can test without Supabase Edge Functions."
+                              : hasGeminiApiKey
+                                ? "Gemini key detected. Live AI review is enabled unless the key has hit quota."
+                                : "Add your Gemini API key to enable live AI review. The key is saved only in this browser."}
+                        </p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                        useLocalApiReview || useServerAiReview || hasGeminiApiKey
+                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                          : "bg-amber-50 text-amber-700 border border-amber-200"
+                      }`}>
+                        {useLocalApiReview ? "Local API Mode" : useServerAiReview ? "Backend Mode" : hasGeminiApiKey ? "Configured" : "Setup Required"}
+                      </span>
+                    </div>
+
+                    {useLocalApiReview ? (
+                      <div className="p-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-600 leading-relaxed">
+                        Local testing is enabled. Use <span className="font-semibold text-slate-900">/api/status</span> to check the local API health.
+                        The app will call <span className="font-semibold text-slate-900">/api/ai-review</span> automatically from localhost.
+                      </div>
+                    ) : useServerAiReview ? (
+                      <div className="p-3 bg-white border border-slate-200 rounded-xl text-xs text-slate-600 leading-relaxed">
+                        Deploy the <span className="font-semibold text-slate-900">ai-review</span> Edge Function and set the
+                        <span className="font-semibold text-slate-900"> GEMINI_API_KEY</span> secret in Supabase. No browser-side API key is needed in this mode.
+                      </div>
+                    ) : (
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="password"
+                          value={geminiApiKey}
+                          onChange={(e) => setGeminiApiKey(e.target.value)}
+                          placeholder="Paste your Gemini API key"
+                          className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-medium focus:outline-none focus:ring-1 focus:ring-slate-900 text-slate-900"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setGeminiApiKey("")}
+                          className="px-4 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition"
+                        >
+                          Clear Key
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {errorMessage && (
+                    <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-medium leading-relaxed">
+                      {errorMessage}
+                    </div>
+                  )}
 
                   {activeSubmission ? (
                     // Graded Day Display Lock

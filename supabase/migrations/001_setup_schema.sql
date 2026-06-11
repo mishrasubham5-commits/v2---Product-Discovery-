@@ -45,6 +45,10 @@ CREATE POLICY "Public profiles are viewable by everyone"
 CREATE POLICY "Users can update own profile" 
     ON profiles FOR UPDATE USING (auth.uid() = id);
 
+-- Users can only create their own profile
+CREATE POLICY "Users can insert own profile"
+    ON profiles FOR INSERT WITH CHECK (auth.uid() = id);
+
 -- 6. Policies for submissions - anyone can see all submissions
 CREATE POLICY "Public submissions are viewable by everyone" 
     ON submissions FOR SELECT USING (true);
