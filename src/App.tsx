@@ -16,6 +16,12 @@ import { UserProfile, SubmissionItem, CustomLeaderboardEntry } from "./types";
 import { isSupabaseConfigured, supabase } from "./supabase";
 import AntigravityLanding from "./components/AntigravityLanding";
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const isUuid = (value: string | null | undefined) =>
+  typeof value === "string" && UUID_PATTERN.test(value);
+
 export default function App() {
   // --- AUTH & PROFILE STATES ---
   const [sessionUser, setSessionUser] = useState<{ email: string; name: string } | null>(() => {
@@ -25,7 +31,15 @@ export default function App() {
 
   const [profile, setProfile] = useState<UserProfile | null>(() => {
     const saved = localStorage.getItem("discovery_profile");
-    return saved ? JSON.parse(saved) : null;
+    if (!saved) return null;
+
+    const parsed = JSON.parse(saved) as UserProfile;
+    if (isSupabaseConfigured && !isUuid(parsed.id)) {
+      localStorage.removeItem("discovery_profile");
+      return null;
+    }
+
+    return parsed;
   });
 
   const [submissions, setSubmissions] = useState<SubmissionItem[]>(() => {
@@ -86,6 +100,8 @@ export default function App() {
 
   // --- PARSE CALLBACK REDIRECT / SIMULATED URL ON CLIENT START ---
   useEffect(() => {
+    if (isSupabaseConfigured) return;
+
     const searchParams = new URLSearchParams(window.location.search);
     const token = searchParams.get("token");
     const isCallback = window.location.pathname.includes("/login/callback") || !!token;
@@ -324,6 +340,8 @@ export default function App() {
   };
 
   const simulateMagicLinkClick = (fallbackName?: string, fallbackEmail?: string) => {
+    if (isSupabaseConfigured) return;
+
     let name = fallbackName || "";
     let email = fallbackEmail || "";
 
@@ -579,7 +597,7 @@ With Gemini API, you'll receive:
     setSubmissionText("");
 
     // Sync to Supabase
-    if (isSupabaseConfigured && supabase) {
+    if (isSupabaseConfigured && supabase && isUuid(profile.id)) {
       try {
         // Save submission
         await supabase.from("submissions").insert([
@@ -608,6 +626,8 @@ With Gemini API, you'll receive:
       } catch (dbErr) {
         console.error("Database sync error:", dbErr);
       }
+    } else if (isSupabaseConfigured && !isUuid(profile.id)) {
+      console.error("Skipped Supabase sync because profile.id is not a valid auth UUID:", profile.id);
     }
 
     setAiLoading(false);
@@ -689,7 +709,7 @@ With Gemini API, you'll receive:
         onLogin={handleLoginSubmit} 
         isLoading={authLoading}
         isMagicLinkSent={isMagicLinkSent} 
-        onSimulateMagicLink={simulateMagicLinkClick}
+        onSimulateMagicLink={isSupabaseConfigured ? undefined : simulateMagicLinkClick}
         isSupabaseConfigured={isSupabaseConfigured}
         errorMessage={errorMessage}
       />

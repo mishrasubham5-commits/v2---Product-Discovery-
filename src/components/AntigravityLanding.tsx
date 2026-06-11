@@ -455,15 +455,27 @@ export default function AntigravityLanding({
                 <div className="text-xs font-bold text-slate-800">🔑 Your Direct Magic Link is Ready!</div>
                 
                 <p className="text-[11px] text-slate-500 leading-normal px-1">
-                  We have generated your verification link for <strong className="text-slate-700">{emailInput}</strong>. You can bypass waiting for an email and click below to sign in instantly:
+                  {isSupabaseConfigured
+                    ? (
+                      <>
+                        We have sent a real Supabase magic link to <strong className="text-slate-700">{emailInput}</strong>. Open your email inbox and click that link to finish sign in.
+                      </>
+                    )
+                    : (
+                      <>
+                        We have generated your verification link for <strong className="text-slate-700">{emailInput}</strong>. You can bypass waiting for an email and click below to sign in instantly:
+                      </>
+                    )}
                 </p>
 
                 <div className="p-2.5 bg-slate-50 border border-slate-200/60 rounded-xl space-y-2 select-text text-left">
-                  <div className="text-[9px] font-mono text-slate-500 break-all bg-white p-2 rounded-lg border border-slate-100 uppercase tracking-tight select-all">
-                    {window.location.origin}/login/callback?token={encodeURIComponent(emailInput || "user")}-active
-                  </div>
-                  
-                  {onSimulateMagicLink && (
+                  {!isSupabaseConfigured && (
+                    <div className="text-[9px] font-mono text-slate-500 break-all bg-white p-2 rounded-lg border border-slate-100 uppercase tracking-tight select-all">
+                      {window.location.origin}/login/callback?token={encodeURIComponent(emailInput || "user")}-active
+                    </div>
+                  )}
+
+                  {onSimulateMagicLink ? (
                     <button
                       type="button"
                       onClick={() => onSimulateMagicLink(nameInput, emailInput)}
@@ -471,6 +483,10 @@ export default function AntigravityLanding({
                     >
                       🚀 Click to Log In Now
                     </button>
+                  ) : (
+                    <div className="text-[10px] text-slate-500 leading-relaxed">
+                      No bypass is available in live mode. Use the email from Supabase to complete authentication with your real user ID.
+                    </div>
                   )}
                 </div>
 
